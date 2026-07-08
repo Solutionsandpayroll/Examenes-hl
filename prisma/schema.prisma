@@ -1,0 +1,58 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Proyecto {
+  id             Int      @id @default(autoincrement())
+  nombre         String   @unique
+  nit_empresa    String?
+  nombre_empresa String?
+  ciudad         String?
+  centro_costos  String?
+  cargos         Cargo[]
+}
+
+model Cargo {
+  id                 Int      @id @default(autoincrement())
+  nombre             String
+  proyecto_id        Int
+  proyecto           Proyecto @relation(fields: [proyecto_id], references: [id], onDelete: Cascade)
+  aptitudes_ingreso   String?
+  aptitudes_periodico String?
+
+  examenes_ingreso    CargoExamen[]
+  examenes_periodicos CargoExamenPeriodico[]
+
+  @@unique([nombre, proyecto_id])
+}
+
+model Examen {
+  id     Int    @id @default(autoincrement())
+  nombre String @unique
+
+  cargos_ingreso    CargoExamen[]
+  cargos_periodicos CargoExamenPeriodico[]
+}
+
+model CargoExamen {
+  cargo_id  Int
+  examen_id Int
+  cargo     Cargo  @relation(fields: [cargo_id], references: [id], onDelete: Cascade)
+  examen    Examen @relation(fields: [examen_id], references: [id], onDelete: Cascade)
+
+  @@id([cargo_id, examen_id])
+}
+
+model CargoExamenPeriodico {
+  cargo_id  Int
+  examen_id Int
+  cargo     Cargo  @relation(fields: [cargo_id], references: [id], onDelete: Cascade)
+  examen    Examen @relation(fields: [examen_id], references: [id], onDelete: Cascade)
+
+  @@id([cargo_id, examen_id])
+}
