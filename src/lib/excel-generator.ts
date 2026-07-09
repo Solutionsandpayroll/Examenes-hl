@@ -125,8 +125,8 @@ export async function generateExcel(data: FormData): Promise<Buffer> {
   if (!sheetData) throw new Error("sheetData not found")
 
   for (const [key, mapping] of Object.entries(CELL_MAP)) {
-    const value = (data as unknown as Record<string, string>)[key]
-    if (value === undefined || value === "") continue
+    const rawValue = (data as unknown as Record<string, string>)[key]
+    const value = rawValue ?? ""
 
     const { col, colNum, row: rowNum } = parseCellRef(mapping.cell)
     let finalValue: string = value
@@ -142,19 +142,19 @@ export async function generateExcel(data: FormData): Promise<Buffer> {
       insertRowSorted(sheetData, rowEl, rowNum)
     }
 
-    // Remove existing cell with this ref
     removeCellByRef(rowEl, mapping.cell)
 
-    // Create new cell
     const cellEl = doc.createElementNS(NS, "c") as XElement
     cellEl.setAttribute("r", mapping.cell)
     cellEl.setAttribute("s", mapping.style)
 
     if (key === "hora_examen") {
-      const decimal = formatHoraDecimal(value)
-      const vEl = doc.createElementNS(NS, "v") as XElement
-      vEl.textContent = String(decimal)
-      cellEl.appendChild(vEl)
+      if (value.trim()) {
+        const decimal = formatHoraDecimal(value)
+        const vEl = doc.createElementNS(NS, "v") as XElement
+        vEl.textContent = String(decimal)
+        cellEl.appendChild(vEl)
+      }
     } else {
       cellEl.setAttribute("t", "inlineStr")
       const isEl = doc.createElementNS(NS, "is") as XElement
