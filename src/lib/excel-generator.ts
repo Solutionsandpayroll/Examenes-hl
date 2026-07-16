@@ -4,7 +4,7 @@ import type { Element as XElement, Document as XDocument } from "@xmldom/xmldom"
 import fs from "fs"
 import path from "path"
 
-const TEMPLATE_PATH = path.join(process.cwd(), "public", "formato-examen.xlsx")
+const TEMPLATE_PATH = path.join(process.cwd(), "public", "formato-examen version 2.xlsx")
 
 const NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 
@@ -14,23 +14,24 @@ const EXAM_CHECKBOX_MAP: Record<string, number> = {
   "GLICEMIA EN AYUNAS": 16,
   "PERFIL LIPIDICO COMPLETO": 15,
   "TRANSAMINASAS (ALAT/ASAT)": 14,
-  MICROALBUMINURIA: 13,
   AUDIOMETRIA: 12,
   OPTOMETRIA: 8,
   "PARCIAL DE ORINA": 23,
-  "CAMPIMETRIA POR CONFRONTACION": 24,
-  "PRUEBA DE DROGAS EN ORINA (PANEL X 5 DROGAS)": 27,
   ESPIROMETRIA: 18,
   "RX DE TORAX AP Y LATERAL": 19,
-  "ELECTROCARDIOGRAMA (MAYORES DE 45)": 20,
+  "ELECTROCARDIOGRAMA (APLICAR MAYORES DE 50)": 20,
   "PRUEBA NEUROPSICOLOGICA PARA ALTURAS": 9,
   "PRUEBA PSICOSENSOMETRICA": 10,
-  "PRUEBAS PSICOSENSOMETRICAS": 11,
-  COPROLOGICO: 21,
-  "PRUEBA DE EMBARAZO": 22,
-  "VACUNA TETANO": 25,
-  "VACUNA FIEBRE AMARILLA": 26,
-  OTRO: 28,
+  "PRUEBA DE EQUILIBRIO": 11,
+  "KOH DE UNAS": 13,
+  "PRUEBA DROGAS EN ORINA (PANEL X5)": 21,
+  "PRUEBA DE ALCOHOL": 22,
+  "VACUNA TETANO": 24,
+  "VACUNA FIEBRE AMARILLA": 25,
+  "ANTIGENO PROSTATICO-PSA (MAYORES 35 ANOS)": 26,
+  "PRUEBA TB (TUBERCULOSIS) EN SANGRE": 27,
+  "RX COLUMNA LUMBAR": 28,
+  MICROALBUMINURIA: 29,
 }
 
 const TIPO_EXAMEN_MAP: Record<string, number> = {

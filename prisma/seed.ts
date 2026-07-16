@@ -18,8 +18,8 @@ const normalizeText = (text: string): string =>
 const normalizeExamName = (name: string): string => {
   const normalized = normalizeText(name)
 
-  if (normalized.includes("DROGAS EN ORINA") || normalized.includes("PRUEBA DE DROGAS"))
-    return "PRUEBA DE DROGAS EN ORINA (PANEL X 5 DROGAS)"
+  if (normalized.includes("DROGAS EN ORINA") || normalized.includes("PRUEBA DE DROGAS") || normalized.includes("DROGAS EN ORINA"))
+    return "PRUEBA DROGAS EN ORINA (PANEL X5)"
   if (normalized.includes("EXAMEN MEDICO") || normalized.includes("OSTEOMUSCULAR"))
     return "EXAMEN MEDICO OCUPACIONAL OSTEOMUSCULAR"
   if (normalized.includes("CUADRO HEMATICO"))
@@ -35,24 +35,33 @@ const normalizeExamName = (name: string): string => {
   if (normalized.includes("OPTOMETR")) return "OPTOMETRIA"
   if (normalized.includes("PARCIAL ORINA") || normalized.includes("PARCIAL DE ORINA"))
     return "PARCIAL DE ORINA"
-  if (normalized.includes("CAMPIMETRIA")) return "CAMPIMETRIA POR CONFRONTACION"
   if (normalized.includes("ESPIROMETR")) return "ESPIROMETRIA"
-  if (normalized.includes("RX DE TORAX") || normalized.includes("RX TORAX"))
-    return "RX DE TORAX AP Y LATERAL"
+  if (normalized.includes("RX DE TORAX") || normalized.includes("RX TORAX") || normalized.includes("RX COLUMNA LUMBAR"))
+    return normalized.includes("COLUMNA") || normalized.includes("LUMBAR")
+      ? "RX COLUMNA LUMBAR"
+      : "RX DE TORAX AP Y LATERAL"
   if (normalized.includes("ELECTROCARDIOGRAMA") || normalized.includes("EKG"))
-    return "ELECTROCARDIOGRAMA (MAYORES DE 45)"
+    return "ELECTROCARDIOGRAMA (APLICAR MAYORES DE 50)"
   if (normalized.includes("NEUROPSICOLOGICA") || normalized.includes("PRUEBAS NEUROPSICOLOGICA"))
     return "PRUEBA NEUROPSICOLOGICA PARA ALTURAS"
-  if (normalized.includes("PSICOSENSOMETRICA")) return "PRUEBAS PSICOSENSOMETRICAS"
-  if (normalized.includes("COPROLOGICO") || normalized.includes("COPROPARASIT")) return "COPROLOGICO"
-  if (normalized.includes("PRUEBA DE EMBARAZO") || normalized.includes("EMBARAZO"))
-    return "PRUEBA DE EMBARAZO"
+  if (normalized.includes("PSICOSENSOMETRICA"))
+    return "PRUEBA PSICOSENSOMETRICA"
+  if (normalized.includes("EQUILIBRIO"))
+    return "PRUEBA DE EQUILIBRIO"
+  if (normalized.includes("KOH DE UNAS") || normalized.includes("KOH UNAS") || normalized.includes("HONGOS"))
+    return "KOH DE UNAS"
   if (normalized.includes("VACUNA") && (normalized.includes("TETANO") || normalized.includes("TETAN")))
     return "VACUNA TETANO"
   if (normalized.includes("VACUN") && normalized.includes("FIEBRE AMARILLA"))
     return "VACUNA FIEBRE AMARILLA"
-  if (normalized.includes("ELECTROCARDIOGRAMA"))
-    return "ELECTROCARDIOGRAMA (MAYORES DE 45)"
+  if (normalized.includes("PRUEBA DE ALCOHOL") || normalized.includes("ALCOHOL"))
+    return "PRUEBA DE ALCOHOL"
+  if (normalized.includes("ANTIGENO PROSTATICO") || normalized.includes("PSA"))
+    return "ANTIGENO PROSTATICO-PSA (MAYORES 35 ANOS)"
+  if (normalized.includes("TB") && (normalized.includes("TUBERCULOSIS") || normalized.includes("TUBERCULOSIS")))
+    return "PRUEBA TB (TUBERCULOSIS) EN SANGRE"
+  if (normalized.includes("TUBERCULOSIS"))
+    return "PRUEBA TB (TUBERCULOSIS) EN SANGRE"
 
   return normalized
 }
