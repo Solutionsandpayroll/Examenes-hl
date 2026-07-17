@@ -1,6 +1,6 @@
 import JSZip from "jszip"
 import { DOMParser, XMLSerializer } from "@xmldom/xmldom"
-import type { Element as XElement, Document as XDocument } from "@xmldom/xmldom"
+import type { Element as XElement } from "@xmldom/xmldom"
 import fs from "fs"
 import path from "path"
 
@@ -71,18 +71,18 @@ interface CellMapping {
 }
 
 const CELL_MAP: Record<string, CellMapping> = {
-  nombre_empresa: { cell: "D7", style: "96" },
-  nit: { cell: "I7", style: "93" },
+  nombre_empresa: { cell: "D7", style: "90" },
+  nit: { cell: "I7", style: "4" },
   empresa_mision: { cell: "D8", style: "85" },
   centro_costos: { cell: "D9", style: "88" },
   ciudad_proyecto: { cell: "I9", style: "90" },
-  nombre_aspirante: { cell: "D13", style: "58" },
-  cedula: { cell: "D14", style: "59" },
-  cargo: { cell: "D15", style: "67" },
-  nombre_ips: { cell: "D20", style: "81" },
-  ciudad_ips: { cell: "D21", style: "72" },
-  telefono_ips: { cell: "I21", style: "75" },
-  direccion_ips: { cell: "D22", style: "75" },
+  nombre_aspirante: { cell: "D13", style: "59" },
+  cedula: { cell: "D14", style: "60" },
+  cargo: { cell: "D15", style: "68" },
+  nombre_ips: { cell: "D20", style: "79" },
+  ciudad_ips: { cell: "D21", style: "73" },
+  telefono_ips: { cell: "I21", style: "76" },
+  direccion_ips: { cell: "D22", style: "61" },
   fecha_examen: { cell: "D23", style: "84" },
   hora_examen: { cell: "I23", style: "83" },
 }
@@ -111,10 +111,108 @@ function parseCellRef(ref: string): { col: string; colNum: number; row: number }
   return { col: match[1], colNum: colLetterToNum(match[1]), row: parseInt(match[2]) }
 }
 
+// --- Shared Strings Manager ---
+class SharedStrings {
+  items: string[]
+
+  constructor(xml: string) {
+    this.items = []
+    const siRegex = /<si>[\s\S]*?<\/si>/g
+    let m
+    while ((m = siRegex.exec(xml)) !== null) {
+      const tMatch = m[0].match(/<t[^>]*>([^<]*)<\/t>/)
+      this.items.push(tMatch ? tMatch[1] : "")
+    }
+  }
+
+  getOrAdd(value: string): number {
+    const idx = this.items.indexOf(value)
+    if (idx >= 0) return idx
+    this.items.push(value)
+    return this.items.length - 1
+  }
+
+  toXml(): string {
+    const count = this.items.length
+    const uniqueCount = new Set(this.items).size
+    let xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n`
+    xml += `<sst xmlns="${NS}" count="${count}" uniqueCount="${uniqueCount}">`
+    for (const item of this.items) {
+      xml += `<si><t>${escXml(item)}</t></si>`
+    }
+    xml += `</sst>`
+    return xml
+  }
+}
+
+function escXml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+}
+
+// --- Main Generator ---
 export async function generateExcel(data: FormData): Promise<Buffer> {
   const templateBuffer = fs.readFileSync(TEMPLATE_PATH)
   const zip = await JSZip.loadAsync(templateBuffer)
 
+  // 1. Load shared strings
+  const ssXml = await zip.file("xl/sharedStrings.xml")!.async("string")
+  const sharedStrings = new SharedStrings(ssXml)
+
+  // 2. Build list of values to add to shared strings
+  const cellValues: { key: string; ref: string; style: string; ssIdx?: number; numValue?: number }[] = []
+
+  for (const [key, mapping] of Object.entries(CELL_MAP)) {
+    const rawValue = (data as unknown as Record<string, string>)[key]
+    const value = (rawValue ?? "").trim()
+    if (!value) continue
+
+    let finalValue = value
+    if (key === "cedula") finalValue = value.replace(/\./g, "")
+
+    if (key === "hora_examen") {
+      cellValues.push({ key, ref: mapping.cell, style: mapping.style, numValue: formatHoraDecimal(value) })
+    } else {
+      const idx = sharedStrings.getOrAdd(finalValue)
+      cellValues.push({ key, ref: mapping.cell, style: mapping.style, ssIdx: idx })
+    }
+  }
+
+  if (data.tipo_examen_otro) {
+    const idx = sharedStrings.getOrAdd(data.tipo_examen_otro)
+    cellValues.push({ key: "cual", ref: "D29", style: "8", ssIdx: idx })
+  }
+
+  // Aptitudes
+  const aptMap: Record<string, { cell: string; style: string }> = {
+    "TRABAJO EN ALTURAS": { cell: "D51", style: "41" },
+    "TRABAJO EN ESPACIOS CONFINADOS": { cell: "D52", style: "93" },
+    CONDUCCIÓN: { cell: "F51", style: "41" },
+    "TRABAJO EN CALIENTE": { cell: "F52", style: "94" },
+  }
+
+  if (data.aptitudes) {
+    const aptitudesList = data.aptitudes
+      .split(",")
+      .map((a) => a.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim())
+    const xIdx = sharedStrings.getOrAdd("X")
+
+    for (const [aptKey, { cell: cellRef, style }] of Object.entries(aptMap)) {
+      const normKey = aptKey.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase()
+      const matched = aptitudesList.some((a) => a === normKey || a.includes(normKey) || normKey.includes(a))
+      if (matched) {
+        cellValues.push({ key: `apt_${aptKey}`, ref: cellRef, style, ssIdx: xIdx })
+      }
+    }
+  }
+
+  // 3. Update shared strings in ZIP
+  await updateZipFile(zip, "xl/sharedStrings.xml", sharedStrings.toXml())
+
+  // 4. Modify sheet1.xml
   const sheetXmlStr = await zip.file("xl/worksheets/sheet1.xml")!.async("string")
   const parser = new DOMParser()
   const doc = parser.parseFromString(sheetXmlStr, "text/xml")
@@ -125,17 +223,25 @@ export async function generateExcel(data: FormData): Promise<Buffer> {
   const sheetData = findChildNS(root, "sheetData")
   if (!sheetData) throw new Error("sheetData not found")
 
+  // Collect all cell refs that will be written (for clearing template defaults)
+  const writtenRefs = new Set(cellValues.map((v) => v.ref))
+
+  // Also clear template cells that are NOT being written (empty user fields)
   for (const [key, mapping] of Object.entries(CELL_MAP)) {
     const rawValue = (data as unknown as Record<string, string>)[key]
-    const value = rawValue ?? ""
+    const value = (rawValue ?? "").trim()
+    if (value) continue // already handled above
+    writtenRefs.add(mapping.cell) // will be cleared
+  }
 
-    const { col, colNum, row: rowNum } = parseCellRef(mapping.cell)
-    let finalValue: string = value
+  // Clear aptitudes cells
+  for (const { cell: cellRef } of Object.values(aptMap)) {
+    writtenRefs.add(cellRef)
+  }
 
-    if (key === "cedula") {
-      finalValue = value.replace(/\./g, "")
-    }
-
+  // Remove old cells and insert new ones
+  for (const cv of cellValues) {
+    const { colNum, row: rowNum } = parseCellRef(cv.ref)
     let rowEl = findRowByNum(sheetData, rowNum)
     if (!rowEl) {
       rowEl = doc.createElementNS(NS, "row") as XElement
@@ -143,105 +249,70 @@ export async function generateExcel(data: FormData): Promise<Buffer> {
       insertRowSorted(sheetData, rowEl, rowNum)
     }
 
-    removeCellByRef(rowEl, mapping.cell)
+    // Try to reuse existing cell
+    const existingCell = findCellByRef(rowEl, cv.ref)
 
-    const cellEl = doc.createElementNS(NS, "c") as XElement
-    cellEl.setAttribute("r", mapping.cell)
-    cellEl.setAttribute("s", mapping.style)
-
-    if (key === "hora_examen") {
-      if (value.trim()) {
-        const decimal = formatHoraDecimal(value)
-        const vEl = doc.createElementNS(NS, "v") as XElement
-        vEl.textContent = String(decimal)
-        cellEl.appendChild(vEl)
+    if (existingCell) {
+      // Modify existing cell in-place preserving all attributes
+      if (cv.ssIdx !== undefined) {
+        existingCell.setAttribute("t", "s")
+        setOrReplaceChild(existingCell, "v", String(cv.ssIdx))
+      } else if (cv.numValue !== undefined) {
+        existingCell.removeAttribute("t")
+        setOrReplaceChild(existingCell, "v", String(cv.numValue))
       }
     } else {
-      cellEl.setAttribute("t", "inlineStr")
-      const isEl = doc.createElementNS(NS, "is") as XElement
-      const tEl = doc.createElementNS(NS, "t") as XElement
-      tEl.textContent = finalValue
-      isEl.appendChild(tEl)
-      cellEl.appendChild(isEl)
-    }
+      // Create new cell
+      const cellEl = doc.createElementNS(NS, "c") as XElement
+      cellEl.setAttribute("r", cv.ref)
+      cellEl.setAttribute("s", cv.style)
 
-    insertCellSorted(rowEl, cellEl, colNum)
-  }
-
-  // "Cual?" field
-  if (data.tipo_examen_otro) {
-    let rowEl = findRowByNum(sheetData, 29)
-    if (!rowEl) {
-      rowEl = doc.createElementNS(NS, "row") as XElement
-      rowEl.setAttribute("r", "29")
-      insertRowSorted(sheetData, rowEl, 29)
-    }
-    removeCellByRef(rowEl, "D29")
-    const cellEl = doc.createElementNS(NS, "c") as XElement
-    cellEl.setAttribute("r", "D29")
-    cellEl.setAttribute("s", "8")
-    cellEl.setAttribute("t", "inlineStr")
-    const isEl = doc.createElementNS(NS, "is")
-    const tEl = doc.createElementNS(NS, "t")
-    tEl.textContent = data.tipo_examen_otro
-    isEl.appendChild(tEl)
-    cellEl.appendChild(isEl)
-    insertCellSorted(rowEl, cellEl, colLetterToNum("D"))
-  }
-
-  // Aptitudes médicas especiales (X marks)
-  if (data.aptitudes) {
-    const aptMap: Record<string, string> = {
-      "TRABAJO EN ALTURAS": "D50",
-      "TRABAJO EN ESPACIOS CONFINADOS": "D51",
-      CONDUCCIÓN: "F50",
-      "TRABAJO EN CALIENTE": "F51",
-    }
-
-    const aptitudesList = data.aptitudes
-      .split(",")
-      .map((a) => a.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim())
-
-    for (const [aptKey, cellRef] of Object.entries(aptMap)) {
-      const normKey = aptKey.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase()
-      const matched = aptitudesList.some((a) => a === normKey || a.includes(normKey) || normKey.includes(a))
-      const { row: aptRow, colNum: aptColNum } = parseCellRef(cellRef)
-
-      let aptRowEl = findRowByNum(sheetData, aptRow)
-      if (!aptRowEl) {
-        aptRowEl = doc.createElementNS(NS, "row") as XElement
-        aptRowEl.setAttribute("r", String(aptRow))
-        insertRowSorted(sheetData, aptRowEl, aptRow)
+      if (cv.ssIdx !== undefined) {
+        cellEl.setAttribute("t", "s")
+        const vEl = doc.createElementNS(NS, "v") as XElement
+        vEl.textContent = String(cv.ssIdx)
+        cellEl.appendChild(vEl)
+      } else if (cv.numValue !== undefined) {
+        const vEl = doc.createElementNS(NS, "v") as XElement
+        vEl.textContent = String(cv.numValue)
+        cellEl.appendChild(vEl)
       }
 
-      removeCellByRef(aptRowEl, cellRef)
+      insertCellSorted(rowEl, cellEl, colNum)
+    }
+  }
 
-      const aptCellEl = doc.createElementNS(NS, "c") as XElement
-      aptCellEl.setAttribute("r", cellRef)
-      aptCellEl.setAttribute("s", "40")
-      aptCellEl.setAttribute("t", "inlineStr")
-      const aptIsEl = doc.createElementNS(NS, "is") as XElement
-      const aptTEl = doc.createElementNS(NS, "t") as XElement
-      aptTEl.textContent = matched ? "X" : ""
-      aptIsEl.appendChild(aptTEl)
-      aptCellEl.appendChild(aptIsEl)
-      insertCellSorted(aptRowEl, aptCellEl, aptColNum)
+  // Clear template cells whose values should be empty (user left them blank)
+  for (const ref of writtenRefs) {
+    if (!cellValues.some((cv) => cv.ref === ref)) {
+      const { row: rowNum } = parseCellRef(ref)
+      const rowEl = findRowByNum(sheetData, rowNum)
+      if (rowEl) {
+        const existingCell = findCellByRef(rowEl, ref)
+        if (existingCell) {
+          // Clear value but keep cell (preserves formatting)
+          existingCell.removeAttribute("t")
+          const toRemove: XElement[] = []
+          const children = existingCell.childNodes
+          for (let i = 0; i < children.length; i++) {
+            const child = children[i] as unknown as XElement
+            if (child.nodeType === 1) toRemove.push(child)
+          }
+          for (const el of toRemove) existingCell.removeChild(el)
+        }
+      }
     }
   }
 
   const updatedSheetXml = serializer.serializeToString(doc)
   await updateZipFile(zip, "xl/worksheets/sheet1.xml", updatedSheetXml)
 
-  // Checkboxes
-  for (let i = 1; i <= 6; i++) {
-    await setCheckbox(zip, i, false)
-  }
+  // 5. Checkboxes
+  for (let i = 1; i <= 6; i++) await setCheckbox(zip, i, false)
   const tipoCbId = TIPO_EXAMEN_MAP[data.tipo_examen.toUpperCase()]
   if (tipoCbId) await setCheckbox(zip, tipoCbId, true)
 
-  for (const cbId of Object.values(EXAM_CHECKBOX_MAP)) {
-    await setCheckbox(zip, cbId, false)
-  }
+  for (const cbId of Object.values(EXAM_CHECKBOX_MAP)) await setCheckbox(zip, cbId, false)
   const examSet = new Set(data.examenes.map((e) => e.trim().toUpperCase()))
   for (const [examName, cbId] of Object.entries(EXAM_CHECKBOX_MAP)) {
     if (examSet.has(examName)) await setCheckbox(zip, cbId, true)
@@ -256,7 +327,7 @@ export async function generateExcel(data: FormData): Promise<Buffer> {
   return result as Buffer
 }
 
-// --- XML DOM Helpers ---
+// --- DOM Helpers ---
 
 function findChildNS(parent: XElement, localName: string): XElement | null {
   const children = parent.childNodes
@@ -307,8 +378,45 @@ function removeCellByRef(rowEl: XElement, ref: string): void {
       }
     }
   }
-  for (const el of toRemove) {
-    rowEl.removeChild(el)
+  for (const el of toRemove) rowEl.removeChild(el)
+}
+
+function findCellByRef(rowEl: XElement, ref: string): XElement | null {
+  const children = rowEl.childNodes
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i] as unknown as XElement
+    if (child.nodeType === 1 && (child.localName === "c" || child.nodeName === "c")) {
+      if (child.getAttribute("r") === ref) return child
+    }
+  }
+  return null
+}
+
+function setOrReplaceChild(parent: XElement, tagName: string, textContent: string): void {
+  // Remove existing child with this tagName
+  const toRemove: XElement[] = []
+  const children = parent.childNodes
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i] as unknown as XElement
+    if (child.nodeType === 1 && (child.localName === tagName || child.nodeName === tagName)) {
+      toRemove.push(child)
+    }
+  }
+  for (const el of toRemove) parent.removeChild(el)
+
+  // Also remove <is> child (for inline strings)
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i] as unknown as XElement
+    if (child.nodeType === 1 && (child.localName === "is" || child.nodeName === "is")) {
+      parent.removeChild(child)
+    }
+  }
+
+  // Create new child
+  const newEl = parent.ownerDocument?.createElementNS(NS, tagName) as XElement
+  if (newEl) {
+    newEl.textContent = textContent
+    parent.appendChild(newEl)
   }
 }
 
@@ -330,31 +438,19 @@ function insertCellSorted(rowEl: XElement, newCell: XElement, colNum: number): v
 
 // --- Checkbox Helpers ---
 
-async function setCheckbox(
-  zip: JSZip,
-  cbId: number,
-  checked: boolean
-): Promise<void> {
+async function setCheckbox(zip: JSZip, cbId: number, checked: boolean): Promise<void> {
   const propPath = `xl/ctrlProps/ctrlProp${cbId}.xml`
   const propFile = zip.file(propPath)
   if (!propFile) return
-
   let propXml = await propFile.async("string")
   propXml = propXml.replace(/\s*checked="[^"]*"/g, "")
   if (checked) {
-    propXml = propXml.replace(
-      /<formControlPr\s/,
-      '<formControlPr checked="Checked" '
-    )
+    propXml = propXml.replace(/<formControlPr\s/, '<formControlPr checked="Checked" ')
   }
   await updateZipFile(zip, propPath, propXml)
 }
 
-async function updateZipFile(
-  zip: JSZip,
-  filePath: string,
-  content: string | Buffer
-): Promise<void> {
+async function updateZipFile(zip: JSZip, filePath: string, content: string | Buffer): Promise<void> {
   zip.remove(filePath)
   zip.file(filePath, content)
 }
